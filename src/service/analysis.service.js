@@ -1,5 +1,6 @@
 import resumeAnalysisModel from "../model/resumeAnalysis/main_schema.model.js";
-import anthropic from "../config/anthropic.js";
+import genAI from "../config/gemini.js";
+import { ENV } from "../utils/env.js";
 
 const SYSTEM_PROMPT = `You are a senior technical recruiter and ATS optimization expert with 15+ years of experience across top tech companies. You have deep knowledge of:
 - ATS (Applicant Tracking Systems) used by companies like Google, Amazon, Microsoft, and top Indian MNCs
@@ -158,41 +159,42 @@ const initiateAnalysis = async ({ fileId, userId, fileUrl, rawText = "", pdfBase
 };
 
 const runAnalysis = async (analysisId, fileUrl, rawText, pdfBase64, experienceLevel) => {
-    let messageContent;
+    let contents;
 
     if (rawText && rawText.trim().length > 50) {
-        messageContent = buildTextPrompt(rawText, experienceLevel);
-    } else if (pdfBase64) {
-        messageContent = [
-            {
-                type: "document",
-                source: { type: "base64", media_type: "application/pdf", data: pdfBase64 },
-            },
-            { type: "text", text: buildDocumentPrompt(experienceLevel) },
-        ];
+        contents = buildTextPrompt(rawText, experienceLevel);
     } else {
-        const base64Pdf = await fetchPdfAsBase64(fileUrl);
-        messageContent = [
+        const base64Pdf = pdfBase64 || await fetchPdfAsBase64(fileUrl);
+        contents = [
             {
-                type: "document",
-                source: { type: "base64", media_type: "application/pdf", data: base64Pdf },
+                role: "user",
+                parts: [
+                    { inlineData: { mimeType: "application/pdf", data: base64Pdf } },
+                    { text: buildDocumentPrompt(experienceLevel) },
+                ],
             },
-            { type: "text", text: buildDocumentPrompt(experienceLevel) },
         ];
     }
 
-    const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8000,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: messageContent }],
+    const response = await genAI.models.generateContent({
+        model: ENV.GEMINI_MODEL,
+        contents,
+        config: {
+            systemInstruction: SYSTEM_PROMPT,
+            maxOutputTokens: 16000,
+            responseMimeType: "application/json",
+            thinkingConfig: { thinkingBudget: 0 },
+        },
     });
 
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock) throw new Error("No text response from AI");
-    if (response.stop_reason === "max_tokens") throw new Error("AI response was cut off — increase max_tokens");
+    if (response.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+        throw new Error("AI response was cut off — increase max_tokens");
+    }
 
-    const raw = textBlock.text.trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+    const text = response.text;
+    if (!text) throw new Error("No text response from AI");
+
+    const raw = text.trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
     const parsed = JSON.parse(raw);
 
     const analysis = await resumeAnalysisModel.findById(analysisId);

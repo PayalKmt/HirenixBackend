@@ -1,6 +1,7 @@
-
 import { getGoogleAuthURL, handleGoogleCallback, getLinkedInAuthURL, handleLinkedInCallback } from "../service/oauth.service.js";
 import { ENV } from "../utils/env.js";
+
+const REDIRECT_URI = "hirenix://auth/callback";
 
 const googleAuth = (req, res) => {
     const url = getGoogleAuthURL();
@@ -10,31 +11,25 @@ const googleAuth = (req, res) => {
 const googleCallbacks = async (req, res) => {
     try {
         const code = req.query.code;
-
         const userData = await handleGoogleCallback(code);
-
-        //  here you can generate JWT / session
         const token = await userData.generateAuthToken();
 
-
-        // 7 day Access
+        // Also set the cookie (for web)
         res.cookie("token", token, {
             maxAge: 7 * 24 * 60 * 60 * 1000,
             httpOnly: true,
             sameSite: "strict",
             secure: ENV.NODE_ENV === "development" ? false : true,
         });
-        //TODO: after login Success then move to which route
-        // res.redirect("http://localhost:5173/dashboard"); 
-        res.redirect("https://www.google.com/");
 
+        // Redirect back to app with token
+        res.redirect(`${REDIRECT_URI}?token=${token}`);
     } catch (error) {
         console.error(error.message);
-        res.send("OAuth failed");
+        res.redirect(`${REDIRECT_URI}?error=${encodeURIComponent(error.message)}`);
     }
 };
 
-// LINKED IN PART
 const linkedinAuth = (req, res) => {
     const url = getLinkedInAuthURL();
     res.redirect(url);
@@ -43,27 +38,20 @@ const linkedinAuth = (req, res) => {
 const linkedinCallbacks = async (req, res) => {
     try {
         const code = req.query.code;
-
         const userData = await handleLinkedInCallback(code);
-
-        //  here you can generate JWT / session
         const token = await userData.generateAuthToken();
 
-
-        // 7 day Access
         res.cookie("token", token, {
             maxAge: 7 * 24 * 60 * 60 * 1000,
             httpOnly: true,
             sameSite: "strict",
             secure: ENV.NODE_ENV === "development" ? false : true,
         });
-        //TODO: after login Success then move to which route
-        // res.redirect("http://localhost:5173/dashboard"); 
-        res.redirect("https://www.linkedin.com/");
 
+        res.redirect(`${REDIRECT_URI}?token=${token}`);
     } catch (error) {
         console.error(error.message);
-        res.send("OAuth failed");
+        res.redirect(`${REDIRECT_URI}?error=${encodeURIComponent(error.message)}`);
     }
 };
 

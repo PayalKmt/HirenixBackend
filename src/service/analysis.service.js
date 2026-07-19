@@ -89,9 +89,9 @@ const JSON_SCHEMA = `{
     }
   ],
   "improvedContent": {
-    "summary": "<fully rewritten professional summary optimized for ATS and the detected target role>",
-    "experience": "<rewritten strongest experience bullet points with metrics and action verbs>",
-    "projects": "<rewritten project descriptions with stronger technical impact statements>"
+    "summary": "<STRING (not an array/object): fully rewritten professional summary optimized for ATS and the detected target role, as one block of plain text>",
+    "experience": "<STRING (not an array/object): rewritten strongest experience bullet points with metrics and action verbs, as one block of plain text using \\n between bullets>",
+    "projects": "<STRING (not an array/object): rewritten project descriptions with stronger technical impact statements, as one block of plain text using \\n between projects>"
   },
   "detectedRole": "<inferred target job role, e.g. Flutter Developer | Full Stack Engineer | Data Scientist>",
   "analysisDepth": "advanced_semantic"
@@ -136,6 +136,38 @@ const sanitiseSuggestions = (suggestions = []) =>
         severity: VALID_SEVERITIES.has(s.severity) ? s.severity : "medium",
         section: VALID_SECTIONS.has(s.section) ? s.section : "general",
     }));
+
+// The model is asked for a plain string per improvedContent field, but LLMs
+// occasionally return a structured array/object instead (e.g. mirroring
+// `sections.experience`). Coerce defensively so a format deviation never
+// crashes the whole analysis via a Mongoose cast error.
+const stringifyImprovedContentEntry = (item) => {
+    if (typeof item === "string") return item;
+    if (!item || typeof item !== "object") return String(item ?? "");
+
+    const heading = [item.role || item.title, item.company].filter(Boolean).join(" — ");
+    const meta = [item.duration, Array.isArray(item.techStack) ? item.techStack.join(", ") : null]
+        .filter(Boolean)
+        .join(" | ");
+    const bullets = Array.isArray(item.description)
+        ? item.description.map((d) => `- ${d}`).join("\n")
+        : item.description || "";
+
+    return [heading, meta, bullets].filter(Boolean).join("\n");
+};
+
+const coerceImprovedContentField = (value) => {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(stringifyImprovedContentEntry).join("\n\n");
+    if (value && typeof value === "object") return stringifyImprovedContentEntry(value);
+    return value == null ? "" : String(value);
+};
+
+const sanitiseImprovedContent = (improvedContent = {}) => ({
+    summary: coerceImprovedContentField(improvedContent.summary),
+    experience: coerceImprovedContentField(improvedContent.experience),
+    projects: coerceImprovedContentField(improvedContent.projects),
+});
 
 const initiateAnalysis = async ({ fileId, userId, fileUrl, rawText = "", pdfBase64 = "", experienceLevel = "fresher" }) => {
     const analysis = await resumeAnalysisModel.create({
@@ -203,7 +235,7 @@ const runAnalysis = async (analysisId, fileUrl, rawText, pdfBase64, experienceLe
     analysis.sections = parsed.sections;
     analysis.sectionScores = parsed.sectionScores;
     analysis.suggestions = sanitiseSuggestions(parsed.suggestions);
-    analysis.improvedContent = parsed.improvedContent;
+    analysis.improvedContent = sanitiseImprovedContent(parsed.improvedContent);
     analysis.detectedRole = parsed.detectedRole || "";
     analysis.analysisDepth = parsed.analysisDepth || "advanced_semantic";
 

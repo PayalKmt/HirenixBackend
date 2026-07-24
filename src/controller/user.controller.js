@@ -4,7 +4,8 @@ import user from "../model/user.model.js";
 import {
   userRegisterService,
   userLoginService,
-  userLogoutService
+  userLogoutService,
+  deleteAccountService
 } from "../service/user.service.js";
 import {
   userValidation,
@@ -106,4 +107,24 @@ const userLogout = async(req,res)=>{
   }
 }
 
-export { userRegister, userLogin,userLogout };
+const deleteAccount = async (req, res) => {
+  try {
+    const user_id = req.auth;
+    if (!user_id) {
+      throw new AppError(STATUS.UNAUTHORIZED, "unauthorized access");
+    }
+
+    const { password } = req.body;
+    const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
+
+    await deleteAccountService({ user_id, password, token });
+
+    res.clearCookie("token");
+    return res.status(STATUS.OK).json({ message: "Account deleted successfully" });
+  } catch (err) {
+    const statusCode = err.statusCode || STATUS.SERVER_ERROR;
+    res.status(statusCode).json({ message: err.message });
+  }
+};
+
+export { userRegister, userLogin, userLogout, deleteAccount };
